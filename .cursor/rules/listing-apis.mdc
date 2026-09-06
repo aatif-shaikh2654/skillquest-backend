@@ -1,0 +1,31 @@
+---
+description: Every listing API must use shared pagination and search
+alwaysApply: true
+---
+
+# Listing APIs
+
+Any endpoint that returns a collection must use `app/core/pagination.py`. Do not invent offset-only pagination or a bare `items` + `total` shape.
+
+- Query: `page` (1-based, default 1), `limit` (default 20, max 100), `search` (optional, max 255)
+- `data`: `items`, `page`, `limit`, `total_count`, `total_pages`
+- Search is case-insensitive and matches the resource's text fields. Blank/whitespace search means "no filter"
+- Repositories take `limit` + `offset` from `offset_for(page, limit)`. Services call `paginate(...)`
+
+```python
+# BAD
+@router.get("/users")
+async def list_users(limit: int = 50, offset: int = 0):
+    rows, total = await repository.list_users(db, limit=limit, offset=offset)
+    return {"items": rows, "total": total}
+
+# GOOD
+@router.get("/users")
+async def list_users(
+    page: PageNumber = DEFAULT_PAGE,
+    limit: Limit = DEFAULT_LIMIT,
+    search: SearchQuery = None,
+):
+    data = await service.list_users(db, page=page, limit=limit, search=search)
+    return UserListResponse(message="Users fetched successfully", data=data)
+```

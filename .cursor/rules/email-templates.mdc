@@ -1,0 +1,22 @@
+---
+description: Create a dedicated HTML email template whenever the app sends a new email
+alwaysApply: true
+---
+
+# Email templates
+
+When adding or changing outbound email, create a new template pair. Do not inline HTML or long email copy in services.
+
+- Add `app/emails/templates/<name>.html` and `app/emails/templates/<name>.txt`
+- Table-based HTML, inline CSS, 560px content width, Arial/Helvetica. This is a transactional email, not an app UI.
+- Placeholders are `{{key}}`. Render with `render_email(name, **context)` then `send_email(to, subject, text, html)`.
+- Escape happens in the renderer for HTML. Never put OTP codes or secrets in API responses.
+
+```python
+# BAD — body built in the service
+await send_email(user.email, "Code", f"Your code is {code}")
+
+# GOOD
+text, html = render_email("otp", first_name=first_name, code=code, expire_minutes=10, contact_url=FRONTEND_ORIGIN)
+await send_email(user.email, "Your SkillQuest verification code", text, html)
+```

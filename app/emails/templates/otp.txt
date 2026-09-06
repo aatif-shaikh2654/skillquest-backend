@@ -1,0 +1,11 @@
+Hi {{first_name}},
+
+Use the code below to finish signing in.
+
+{{code}}
+
+This code expires in {{expire_minutes}} minutes.
+
+Didn't request this code? Contact us: {{contact_url}}
+
+Delivered by SkillQuest

@@ -1,0 +1,19 @@
+---
+description: Add and apply an Alembic migration whenever SQLAlchemy models change
+alwaysApply: true
+---
+
+# Database migrations
+
+Any change to SQLAlchemy models (`app/**/models.py`) must ship with an Alembic revision in the same change. Do not edit a live database by hand.
+
+- Add a new file under `alembic/versions/` that revises the current head (today: check `python3 -m alembic heads`).
+- Cover create/drop table, add/drop/alter column, indexes, and unique constraints. Leave unused tables in place unless the user asks to drop them.
+- Do not edit a revision that has already been applied in shared or local DBs. Write a new revision instead.
+- After writing the revision, run `python3 -m alembic upgrade head` and confirm `alembic current` matches `alembic heads`.
+- If the API then hits `UndefinedTableError` / missing column, the migration was not applied — upgrade; do not paper over it in application code.
+
+```text
+# BAD — model has EmailOtp, no new revision, server 500s
+# GOOD — 004_email_otps.py + `alembic upgrade head`
+```
