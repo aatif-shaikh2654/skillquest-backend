@@ -51,6 +51,7 @@ app/
   middleware/rate_limit.py  IP rate limits (on only for a public https FRONTEND_ORIGIN)
   modules/auth/           signup, OTP login, Google
   modules/user/           current user profile
+  modules/instructor/     become-instructor wizard
   modules/admin/          staff login, me, logout, user listing
 alembic/versions/         schema migrations
 ```
@@ -63,7 +64,7 @@ Protected routes read `quest_session`. Use `get_current_user` for the authentica
 - Do not store JWTs in JavaScript. Cookies are HttpOnly.
 - Point `FRONTEND_ORIGIN` at the frontend origin(s), comma-separated if you have more than one (example: `http://localhost:3000, http://localhost:5173`). Cookie-setting auth POSTs (`/auth/verify-otp`, `/auth/social-login`, `/admin/login`) require a matching `Origin` (or `Referer`) header so a cross-site form cannot set session cookies.
 - Call the API with the same hostname the frontend uses (`localhost` with `localhost`, or `127.0.0.1` with `127.0.0.1`). Mixed hosts are cross-site; the API then sets `SameSite=None; Secure; Partitioned` so the browser will send the cookies. Same-host requests keep `SameSite=Lax`.
-- Public auth is OTP-only. Signup takes `{ email, full_name }` and creates a **USER** (`is_instructor: false`). Login takes `{ email }`. Both finish with `POST /auth/verify-otp`. After login, `POST /auth/become-instructor` sets `is_instructor: true`. Phone is not collected at signup. Emails are trimmed and stored/looked up in lowercase, so `Ada@Example.COM` matches `ada@example.com`.
+- Public auth is OTP-only. Signup takes `{ email, full_name }` and creates a **USER** (`is_instructor: false`). Login takes `{ email }`. Both finish with `POST /auth/verify-otp`. After login, `POST /instructor/become` stores the wizard answers and sets `is_instructor: true`. Phone is not collected at signup. Emails are trimmed and stored/looked up in lowercase, so `Ada@Example.COM` matches `ada@example.com`.
 - OTP emails are limited to one send per 60 seconds and 5 sends per 60 minutes per user. A known account that hits either limit gets `429`. Login and resend return `404` if no public account exists for that email. Signup returns `409` and does not create a row if the email is already taken.
 - HTTP rate limits are **off locally**. They turn on when any `FRONTEND_ORIGIN` entry is a public `https` URL (not `localhost` / `127.0.0.1`). Auth POSTs are 10 / 60s per IP; other routes are 60 / 60s. Over the cap: `429` `{ "success": false, "message": "Too many requests. Try again later." }`. `GET /` and docs are not counted.
 - `ADMIN` and `SUPER_ADMIN` sign in with `POST /admin/login` (`email` + `password`). Public signup never accepts a role or password. Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` to seed one `SUPER_ADMIN` on startup (created only if that email is new).
@@ -82,7 +83,6 @@ Roles: `USER`, `ADMIN`, `SUPER_ADMIN`. Public signup never accepts a role from t
 | POST   | `/auth/verify-otp`        | public          | `{ "email", "code" }` — marks email verified and sets cookies. Staff roles cannot use this. |
 | POST   | `/auth/social-login`      | public          | `{ "id_token" }` — Google ID token. New users are **USER**. Sets cookies.                   |
 | POST   | `/auth/link-google`       | cookie          | `{ "id_token" }` — link Google to the logged-in user. Emails must match.                    |
-| POST   | `/auth/become-instructor` | cookie          | Empty body. Sets `is_instructor` on a **USER**. `409` if already set, `403` for staff.      |
 | POST   | `/auth/refresh`           | `quest_renewal` | Rotate both cookies.                                                                        |
 | POST   | `/auth/logout`            | cookie          | Clear cookies and invalidate sessions.                                                      |
 
@@ -91,6 +91,36 @@ Roles: `USER`, `ADMIN`, `SUPER_ADMIN`. Public signup never accepts a role from t
 | Method | Path       | Auth   | Description                                                                              |
 | ------ | ---------- | ------ | ---------------------------------------------------------------------------------------- |
 | GET    | `/user/me` | cookie | Return the logged-in user from the database. `401` if the session is missing or invalid. |
+
+## Instructor APIs
+
+Cookie-authenticated **USER** only. Completing the 4-step wizard creates an `instructors` row and sets `is_instructor: true` immediately. Staff cannot use this. `409` if already an instructor.
+
+| Method | Path                 | Auth   | Description                                                                 |
+| ------ | -------------------- | ------ | --------------------------------------------------------------------------- |
+| POST   | `/instructor/become` | cookie | Wizard answers. Creates the instructor profile. `403` for staff, `409` if already set. |
+
+### Become-instructor body
+
+```json
+{
+  "teaching_experience": "ONLINE",
+  "video_experience": "BEGINNER",
+  "audience_size": "NONE",
+  "teaching_topic": "TECHNOLOGY"
+}
+```
+
+Allowed values:
+
+- `teaching_experience`: `IN_PERSON_INFORMAL`, `IN_PERSON_PROFESSIONAL`, `ONLINE`, `OTHER`
+- `video_experience`: `BEGINNER`, `SOME_KNOWLEDGE`, `EXPERIENCED`, `VIDEOS_READY`
+- `audience_size`: `NONE`, `SMALL`, `SUFFICIENT`, `LARGE`
+- `teaching_topic`: `TECHNOLOGY`, `DESIGN`, `BUSINESS`, `MARKETING`, `PERSONAL_DEVELOPMENT`, `MUSIC`, `HEALTH_FITNESS`, `LIFESTYLE`, `EDUCATION`, `OTHER`
+
+### Become-instructor response `data`
+
+User fields plus the four answers. `is_instructor` is `true`.
 
 ## Admin APIs
 
@@ -156,7 +186,7 @@ Staff-only. Login and logout are public paths so cookies can be set and cleared.
 2. User enters the 6-digit code from email. If no email arrives, `POST /auth/resend-otp`
 3. Frontend `POST /auth/verify-otp` with `{ "email", "code" }`
 4. Cookies are set; later calls use `credentials: "include"`
-5. To teach, the logged-in user calls `POST /auth/become-instructor` (empty body)
+5. To teach, the logged-in user completes the wizard and `POST /instructor/become` with the four answers
 
 Returning users skip signup and call `POST /auth/login` with email only, then `verify-otp`.
 
@@ -167,7 +197,7 @@ Every OTP email (signup, login, resend) shares the same per-user limits:
 - 60-second cooldown after the last send
 - 5 sends in a rolling 60-minute window
 
-A limited known user gets `{ "success": false, "message": "..." }` with status `429`. Login and resend return `404` (`No account found for that email.`) when the email is unknown, inactive, or a staff role. Signup returns `409` and does not insert a user when the email already exists.
+A limited known user gets `{ "success": false, "message": "..." }` with status `429`. Login and resend return `404` (`No account found for that email.`) when the email is unknown or a staff role, and `403` (`Your account is disabled`) when the account is inactive. Signup returns `409` and does not insert a user when the email already exists.
 
 ### API rate limits
 

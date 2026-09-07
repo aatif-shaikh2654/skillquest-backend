@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from app.core.config import async_database_url
 from app.db.base import Base
 from app.modules.auth import models as auth_models  # noqa: F401
+from app.modules.instructor import models as instructor_models  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", async_database_url())

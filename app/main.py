@@ -16,6 +16,7 @@ from app.middleware.rate_limit import RateLimitMiddleware
 from app.modules.admin.routes import router as admin_router
 from app.modules.auth.routes import router as auth_router
 from app.modules.auth.seed import seed_super_admin
+from app.modules.instructor.routes import router as instructor_router
 from app.modules.user.routes import router as user_router
 
 
@@ -48,4 +49,5 @@ async def health() -> dict[str, str]:
 
 app.include_router(auth_router)
 app.include_router(user_router)
+app.include_router(instructor_router)
 app.include_router(admin_router)

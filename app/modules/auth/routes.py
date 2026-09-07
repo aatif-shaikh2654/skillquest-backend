@@ -16,7 +16,7 @@ from app.modules.auth.schemas import (
     SignupRequest,
     SocialLoginRequest,
     VerifyOtpRequest,
-) 
+)
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -96,15 +96,6 @@ async def link_google(
         raw_id_token=payload.id_token,
     )
     return AuthResponse(message="Google account linked successfully", data=user)
-
-
-@router.post("/become-instructor", response_model=AuthResponse)
-async def become_instructor(
-    current_user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> AuthResponse:
-    user = await auth_service.become_instructor(db, user_id=current_user.id)
-    return AuthResponse(message="You are now an instructor", data=user)
 
 
 @router.post("/refresh", response_model=AuthResponse)

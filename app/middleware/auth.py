@@ -2,7 +2,7 @@ from starlette.requests import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.core.config import ACCESS_COOKIE_NAME
-from app.core.exceptions import error_response
+from app.core.exceptions import ACCOUNT_DISABLED_MESSAGE, error_response
 from app.core.security import TokenType, decode_token
 from app.db.session import SessionLocal
 from app.modules.auth.repository import get_by_id
@@ -55,13 +55,11 @@ class AuthMiddleware:
 
         async with SessionLocal() as db:
             user = await get_by_id(db, payload.user_id)
-            if (
-                user is None
-                or not user.is_active
-                or not user.email_verified
-                or user.session_version != payload.session_version
-            ):
+            if user is None or not user.email_verified or user.session_version != payload.session_version:
                 await error_response(401, "Not authenticated")(scope, receive, send)
+                return
+            if not user.is_active:
+                await error_response(403, ACCOUNT_DISABLED_MESSAGE)(scope, receive, send)
                 return
             request.state.user = CurrentUser.model_validate(user)
 

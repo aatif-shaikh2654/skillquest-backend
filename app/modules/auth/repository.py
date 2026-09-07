@@ -71,11 +71,6 @@ async def mark_email_verified(db: AsyncSession, user: User) -> None:
     await db.flush()
 
 
-async def set_is_instructor(db: AsyncSession, user: User) -> None:
-    user.is_instructor = True
-    await db.flush()
-
-
 async def increment_session_version(db: AsyncSession, user: User) -> int:
     user.session_version += 1
     await db.flush()

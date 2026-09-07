@@ -7,6 +7,9 @@ from fastapi.responses import JSONResponse
 logger = logging.getLogger(__name__)
 
 
+ACCOUNT_DISABLED_MESSAGE = "Your account is disabled"
+
+
 class AppError(Exception):
     def __init__(self, message: str, status_code: int) -> None:
         self.message = message

@@ -18,7 +18,7 @@ from app.core.config import (
 )
 from app.core.email import send_email
 from app.emails.render import render_email
-from app.core.exceptions import AppError
+from app.core.exceptions import ACCOUNT_DISABLED_MESSAGE, AppError
 from app.core.security import (
     TokenType,
     create_renewal_token,
@@ -43,8 +43,6 @@ SIGNUP_OTP_MESSAGE = "Signed up successfully. Check your email for a verificatio
 INVALID_OTP_MESSAGE = "Invalid or expired verification code"
 OTP_COOLDOWN_MESSAGE = "Please wait before requesting another code."
 OTP_RATE_LIMIT_MESSAGE = "Too many verification codes requested. Try again later."
-ALREADY_INSTRUCTOR_MESSAGE = "Already an instructor"
-STAFF_CANNOT_BECOME_INSTRUCTOR_MESSAGE = "Staff accounts cannot become instructors"
 
 
 def _to_public_user(user: User) -> UserPublic:
@@ -154,8 +152,10 @@ async def signup(
 
 async def request_login_otp(db: AsyncSession, *, email: str) -> None:
     user = await repository.get_by_email(db, normalize_email(email))
-    if user is None or not user.is_active or user.role not in PUBLIC_LOGIN_ROLES:
+    if user is None or user.role not in PUBLIC_LOGIN_ROLES:
         raise AppError(ACCOUNT_NOT_FOUND_MESSAGE, 404)
+    if not user.is_active:
+        raise AppError(ACCOUNT_DISABLED_MESSAGE, 403)
     await _issue_otp(db, user)
 
 
@@ -166,8 +166,10 @@ async def verify_otp(db: AsyncSession, *, email: str, code: str) -> AuthResult:
         if user is not None
         else None
     )
-    if user is None or not user.is_active or stored is None or user.role not in PUBLIC_LOGIN_ROLES:
+    if user is None or stored is None or user.role not in PUBLIC_LOGIN_ROLES:
         raise AppError(INVALID_OTP_MESSAGE, 400)
+    if not user.is_active:
+        raise AppError(ACCOUNT_DISABLED_MESSAGE, 403)
 
     await repository.mark_email_verified(db, user)
     await repository.mark_email_otp_used(db, stored)
@@ -179,12 +181,13 @@ async def admin_login(db: AsyncSession, *, email: str, password: str) -> AuthRes
     user = await repository.get_by_email(db, normalize_email(email))
     if (
         user is None
-        or not user.is_active
         or user.password_hash is None
         or user.role not in ADMIN_LOGIN_ROLES
         or not verify_password(password, user.password_hash)
     ):
         raise AppError(GENERIC_ADMIN_AUTH_FAILURE, 401)
+    if not user.is_active:
+        raise AppError(ACCOUNT_DISABLED_MESSAGE, 403)
     return await _issue_auth_result(db, user)
 
 
@@ -193,13 +196,13 @@ async def social_login(db: AsyncSession, *, raw_id_token: str) -> AuthResult:
     existing = await repository.get_by_google_id(db, google_user["google_id"])
     if existing is not None:
         if not existing.is_active:
-            raise AppError("Account is inactive", 401)
+            raise AppError(ACCOUNT_DISABLED_MESSAGE, 403)
         return await _issue_auth_result(db, existing)
 
     existing_email = await repository.get_by_email(db, google_user["email"])
     if existing_email is not None:
         if not existing_email.is_active:
-            raise AppError("Account is inactive", 401)
+            raise AppError(ACCOUNT_DISABLED_MESSAGE, 403)
         if existing_email.google_id and existing_email.google_id != google_user["google_id"]:
             raise AppError("This email is already linked to another account", 409)
         if existing_email.email_verified:
@@ -229,8 +232,10 @@ async def social_login(db: AsyncSession, *, raw_id_token: str) -> AuthResult:
 
 async def link_google(db: AsyncSession, *, user_id: uuid.UUID, raw_id_token: str) -> UserPublic:
     user = await repository.get_by_id(db, user_id)
-    if user is None or not user.is_active:
+    if user is None:
         raise AppError("Not authenticated", 401)
+    if not user.is_active:
+        raise AppError(ACCOUNT_DISABLED_MESSAGE, 403)
     if not user.email_verified:
         raise AppError("Please verify your email before logging in", 401)
 
@@ -244,18 +249,6 @@ async def link_google(db: AsyncSession, *, user_id: uuid.UUID, raw_id_token: str
         raise AppError("This email is already linked to another account", 409)
 
     await repository.set_google_id(db, user, google_user["google_id"])
-    return _to_public_user(user)
-
-
-async def become_instructor(db: AsyncSession, *, user_id: uuid.UUID) -> UserPublic:
-    user = await repository.get_by_id(db, user_id)
-    if user is None or not user.is_active:
-        raise AppError("Not authenticated", 401)
-    if user.role != Role.USER:
-        raise AppError(STAFF_CANNOT_BECOME_INSTRUCTOR_MESSAGE, 403)
-    if user.is_instructor:
-        raise AppError(ALREADY_INSTRUCTOR_MESSAGE, 409)
-    await repository.set_is_instructor(db, user)
     return _to_public_user(user)
 
 
@@ -275,10 +268,11 @@ async def refresh_session(db: AsyncSession, renewal_token: str | None) -> AuthRe
         or stored.revoked_at is not None
         or stored.expires_at <= now
         or user is None
-        or not user.is_active
         or payload.session_version != user.session_version
     ):
         raise AppError("Invalid or expired token", 401)
+    if not user.is_active:
+        raise AppError(ACCOUNT_DISABLED_MESSAGE, 403)
 
     await repository.revoke_refresh_token_row(db, stored)
     return await _issue_auth_result(db, user)
